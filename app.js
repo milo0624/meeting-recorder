@@ -308,11 +308,20 @@ $("settingsBtn").addEventListener("click", openSettings);
 $("settingsCancel").addEventListener("click", closeSettings);
 sheetBackdrop.addEventListener("click", (e) => { if (e.target === sheetBackdrop) closeSettings(); });
 $("settingsSave").addEventListener("click", () => {
-  settings.workerUrl = $("workerUrl").value.trim();
-  settings.model = $("modelSelect").value;
-  saveSettings(settings);
-  updateQuotaPanel();
-  closeSettings();
+  try {
+    let url = $("workerUrl").value.trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+      url = "https://" + url; // 忘記打 https:// 時自動補上
+    }
+    settings.workerUrl = url;
+    settings.model = $("modelSelect").value;
+    saveSettings(settings);
+    updateQuotaPanel();
+    closeSettings();
+    statusText.textContent = "設定已儲存。";
+  } catch (e) {
+    alert("儲存失敗：" + (e && e.message ? e.message : e));
+  }
 });
 
 /* ── 錄音按鈕 ─────────────────────────────────────────────────── */
