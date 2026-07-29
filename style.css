@@ -30,6 +30,11 @@
 
 * { box-sizing: border-box; }
 
+/* 保證 hidden 屬性一定有效，不被任何 class 的 display 設定蓋過去
+   （這是今天按鈕點不到的真正原因：.deck 設了 display:flex，
+   跟 hidden 想要的 display:none 打架，.deck 贏了）。 */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
