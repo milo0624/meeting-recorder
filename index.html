@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<div class="deck">
+<div class="deck" id="mainView">
 
   <!-- ── 機身頂部：像錄音機的 LCD 顯示區 ───────────────────────── -->
   <header class="fascia">
@@ -92,36 +92,38 @@
 
 </div>
 
-<!-- ── 設定面板（滑入式） ──────────────────────────────────────── -->
-<div class="sheet-backdrop" id="sheetBackdrop" hidden>
-  <div class="sheet" role="dialog" aria-label="設定">
-    <div class="sheet__grip"></div>
-    <h2>設定</h2>
-
-    <div class="field">
-      <label for="workerUrl">Worker 端點網址</label>
-      <input id="workerUrl" type="url" placeholder="https://your-worker.your-subdomain.workers.dev" />
-      <p class="hint">處理音訊、呼叫 Gemini 的 Cloudflare Worker 網址（見 worker/ 資料夾）。</p>
+<!-- ── 設定畫面（一般版面切換，不用懸浮視窗，避免 iOS 鍵盤+fixed 定位的點擊失效問題） ── -->
+<div class="deck" id="settingsView" hidden>
+  <header class="fascia">
+    <div class="fascia__brand">
+      <button class="icon-btn" id="settingsBack" aria-label="返回">←</button>
+      <span class="fascia__title">設定</span>
     </div>
+  </header>
 
-    <div class="field">
-      <label for="modelSelect">模型</label>
-      <select id="modelSelect">
-        <option value="gemini-flash-latest">gemini-flash-latest（推薦，額度較高）</option>
-        <option value="gemini-flash-lite-latest">gemini-flash-lite-latest（額度最高，品質較簡）</option>
-        <option value="gemini-pro-latest">gemini-pro-latest（品質較好，額度較少）</option>
-      </select>
-    </div>
+  <div class="field">
+    <label for="workerUrl">Worker 端點網址</label>
+    <input id="workerUrl" type="url" placeholder="https://your-worker.your-subdomain.workers.dev" />
+    <p class="hint">處理音訊、呼叫 Gemini 的 Cloudflare Worker 網址（見 worker/ 資料夾）。</p>
+  </div>
 
-    <p class="hint">
-      ⚠ Gemini API Key 不放在這裡——Key 設定在 Cloudflare Worker 的環境變數，
-      手機端完全不會接觸到 Key，比較安全。
-    </p>
+  <div class="field">
+    <label for="modelSelect">模型</label>
+    <select id="modelSelect">
+      <option value="gemini-flash-latest">gemini-flash-latest（推薦，額度較高）</option>
+      <option value="gemini-flash-lite-latest">gemini-flash-lite-latest（額度最高，品質較簡）</option>
+      <option value="gemini-pro-latest">gemini-pro-latest（品質較好，額度較少）</option>
+    </select>
+  </div>
 
-    <div class="sheet__actions">
-      <button class="pill-btn pill-btn--ghost" id="settingsCancel">取消</button>
-      <button class="pill-btn" id="settingsSave">儲存</button>
-    </div>
+  <p class="hint">
+    ⚠ Gemini API Key 不放在這裡——Key 設定在 Cloudflare Worker 的環境變數，
+    手機端完全不會接觸到 Key，比較安全。
+  </p>
+
+  <div class="settings-actions">
+    <button class="pill-btn pill-btn--ghost" id="settingsCancel">取消</button>
+    <button class="pill-btn" id="settingsSave">儲存</button>
   </div>
 </div>
 

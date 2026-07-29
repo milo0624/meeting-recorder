@@ -1,7 +1,7 @@
 // v2：改成「網路優先」——每次都先試著抓最新版本，只有離線的時候才退回
 // 快取版本。這樣以後更新 app.js / index.html，手機上會直接吃到新版，
 // 不用再手動清瀏覽器資料。
-const CACHE = "meeting-recorder-v2";
+const CACHE = "meeting-recorder-v3";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "manifest.json"];
 
 self.addEventListener("install", (e) => {

@@ -295,18 +295,23 @@ function applyMeter(key, item) {
   fill.style.background = ratio >= 1 ? "var(--danger)" : ratio >= 0.8 ? "var(--warn)" : "var(--ok)";
 }
 
-/* ── 設定面板 ─────────────────────────────────────────────────── */
-const sheetBackdrop = $("sheetBackdrop");
+/* ── 設定畫面（版面切換，不是懸浮視窗）───────────────────────── */
+const mainView = $("mainView");
+const settingsView = $("settingsView");
 function openSettings() {
   $("workerUrl").value = settings.workerUrl;
   $("modelSelect").value = settings.model;
-  sheetBackdrop.hidden = false;
+  mainView.hidden = true;
+  settingsView.hidden = false;
 }
-function closeSettings() { sheetBackdrop.hidden = true; }
+function closeSettings() {
+  settingsView.hidden = true;
+  mainView.hidden = false;
+}
 
 $("settingsBtn").addEventListener("click", openSettings);
 $("settingsCancel").addEventListener("click", closeSettings);
-sheetBackdrop.addEventListener("click", (e) => { if (e.target === sheetBackdrop) closeSettings(); });
+$("settingsBack").addEventListener("click", closeSettings);
 $("settingsSave").addEventListener("click", () => {
   try {
     let url = $("workerUrl").value.trim();

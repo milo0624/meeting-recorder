@@ -317,39 +317,8 @@ body {
   border: 1px solid var(--stroke);
 }
 
-/* ── 設定滑出面板 ─────────────────────────────────────────── */
-.sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.5);
-  display: flex;
-  align-items: flex-end;
-  z-index: 20;
-}
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  margin: 0 auto;
-  background: var(--panel-raised);
-  border: 1px solid var(--stroke);
-  border-bottom: none;
-  border-radius: 20px 20px 0 0;
-  padding: 10px 20px calc(env(safe-area-inset-bottom) + 20px);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.sheet__grip {
-  width: 36px; height: 4px;
-  border-radius: 2px;
-  background: var(--stroke);
-  margin: 6px auto 4px;
-}
-.sheet h2 {
-  margin: 0;
-  font-size: 17px;
-}
-.sheet__actions {
+/* ── 設定畫面（一般版面，不是懸浮視窗）───────────────────── */
+.settings-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
