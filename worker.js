@@ -64,6 +64,7 @@ function guessGeminiMimeType(filename, blobType) {
   if (lower.endsWith(".wav")) return "audio/wav";
   if (lower.endsWith(".mp3")) return "audio/mp3";
   if (lower.endsWith(".flac")) return "audio/flac";
+  if (lower.endsWith(".aif") || lower.endsWith(".aiff")) return "audio/aiff";
   return "audio/webm";
 }
 
