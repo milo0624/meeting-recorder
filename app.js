@@ -247,9 +247,13 @@ async function processAudio(blob) {
 
   setBusy(true, "上傳音檔並請 Gemini 整理會議記錄…");
   try {
-    const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+    // 上傳的既有檔案（File 物件）保留原始檔名/副檔名，錄音產生的 Blob 才用猜的
+    const filename =
+      typeof File !== "undefined" && blob instanceof File && blob.name
+        ? blob.name
+        : "meeting." + (blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm");
     const form = new FormData();
-    form.append("audio", blob, "meeting." + ext);
+    form.append("audio", blob, filename);
     form.append("model", settings.model);
     form.append("user", settings.userId || "");
     form.append("extra", extraInput.value || "");
@@ -295,6 +299,7 @@ function setBusy(busy, msg) {
   busyRow.hidden = !busy;
   busyText.textContent = msg || "處理中…";
   recordBtn.disabled = busy;
+  uploadTriggerBtn.disabled = busy;
 }
 
 /* ── 用量面板 ─────────────────────────────────────────────────── */
@@ -352,6 +357,28 @@ $("settingsSave").addEventListener("click", () => {
 recordBtn.addEventListener("click", () => {
   if (recording) stopRecording();
   else startRecording();
+});
+
+/* ── 上傳既有錄音檔（不用錄音，直接選檔案） ───────────────────── */
+const uploadTriggerBtn = $("uploadTriggerBtn");
+const fileInput = $("fileInput");
+
+uploadTriggerBtn.addEventListener("click", () => {
+  if (recording) {
+    alert("正在錄音中，請先停止錄音再上傳檔案。");
+    return;
+  }
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", async () => {
+  const file = fileInput.files && fileInput.files[0];
+  fileInput.value = ""; // 清空，讓同一個檔案下次還能再選一次
+  if (!file) return;
+
+  elapsedEl.textContent = "--:--";
+  statusText.textContent = `已選擇檔案：${file.name}，準備送出給 Gemini…`;
+  await processAudio(file);
 });
 
 /* ── 下載 / 分享報告 ──────────────────────────────────────────── */

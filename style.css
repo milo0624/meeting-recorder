@@ -207,12 +207,14 @@ body {
   transition: border-color .2s, box-shadow .2s;
 }
 
-.rec-btn__core {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--rec);
-  transition: border-radius .25s ease, width .25s ease, height .25s ease;
+.rec-btn__bolt {
+  width: 58px;
+  height: 58px;
+  transition: transform .2s ease;
+}
+.rec-btn__bolt-shape, .rec-btn__tail-shape {
+  fill: var(--rec);
+  transition: fill .2s ease;
 }
 
 .rec-btn[aria-pressed="true"] .rec-btn__ring {
@@ -220,15 +222,27 @@ body {
   box-shadow: 0 0 0 6px rgba(229,72,77,.12);
   animation: pulse-ring 1.4s ease-out infinite;
 }
-.rec-btn[aria-pressed="true"] .rec-btn__core {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+.rec-btn[aria-pressed="true"] .rec-btn__bolt {
+  transform: scale(.86);
 }
 
 .transport__label {
   font-size: 13px;
   color: var(--text-dim);
+}
+
+.link-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: underline;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.link-btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
 }
 
 .spinner-row {
