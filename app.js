@@ -119,9 +119,11 @@ const vuSegs = Array.from(document.querySelectorAll(".vu__seg"));
 const resultSection = $("resultSection");
 const resultFrame = $("resultFrame");
 const saveBtn = $("saveBtn");
+const downloadRawBtn = $("downloadRawBtn");
 
 let settings = loadSettings();
 let lastReportHtml = null;
+let lastFailedBlob = null; // 處理失敗時保留這次的錄音，供使用者下載救援
 
 /* ── 錄音狀態 ─────────────────────────────────────────────────── */
 let mediaRecorder = null;
@@ -136,6 +138,8 @@ let audioCtx = null, analyser = null, analyserData = null, vuHandle = null;
 async function startRecording() {
   if (recording || starting) return; // 錄音中或正在啟動時，忽略重複點擊
   starting = true;
+  downloadRawBtn.hidden = true;
+  lastFailedBlob = null;
   recordBtn.disabled = true; // 取得麥克風權限的過程中先鎖住按鈕，避免連點
 
   try {
@@ -281,6 +285,8 @@ async function processAudio(blob) {
     resultSection.hidden = false;
     saveBtn.disabled = false;
     statusText.textContent = `完成。本次用了 ${(data.usage?.total_tokens || 0).toLocaleString()} tokens。`;
+    downloadRawBtn.hidden = true; // 成功了就不用留救援按鈕
+    lastFailedBlob = null;
   } catch (e) {
     const msg = String(e.message || e);
     if (/429|resource_exhausted|quota|rate limit/i.test(msg)) {
@@ -288,6 +294,8 @@ async function processAudio(blob) {
     } else {
       statusText.textContent = "處理失敗，請重試。";
     }
+    lastFailedBlob = blob; // 保留這次的錄音，讓使用者能救回原始檔案
+    downloadRawBtn.hidden = false;
     alert("處理失敗：\n" + msg);
   } finally {
     setBusy(false);
@@ -391,6 +399,27 @@ saveBtn.addEventListener("click", async () => {
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: "會議記錄" });
+      return;
+    } catch { /* 使用者取消分享，改走下載 */ }
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* ── 處理失敗時的救援：下載原始錄音檔 ─────────────────────────── */
+downloadRawBtn.addEventListener("click", async () => {
+  if (!lastFailedBlob) return;
+  const ext = lastFailedBlob.type.includes("mp4") ? "m4a" : lastFailedBlob.type.includes("ogg") ? "ogg" : "webm";
+  const ts = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const filename = lastFailedBlob.name || `meeting_${ts}.${ext}`;
+  const file = new File([lastFailedBlob], filename, { type: lastFailedBlob.type || "application/octet-stream" });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "會議錄音（處理失敗，原始檔案）" });
       return;
     } catch { /* 使用者取消分享，改走下載 */ }
   }
