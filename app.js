@@ -128,15 +128,22 @@ let mediaRecorder = null;
 let mediaStream = null;
 let chunks = [];
 let recording = false;
+let starting = false; // 防止快速連點時重複啟動（會造成多組計時器疊加，停止時清不乾淨）
 let startedAt = 0;
 let timerHandle = null;
 let audioCtx = null, analyser = null, analyserData = null, vuHandle = null;
 
 async function startRecording() {
+  if (recording || starting) return; // 錄音中或正在啟動時，忽略重複點擊
+  starting = true;
+  recordBtn.disabled = true; // 取得麥克風權限的過程中先鎖住按鈕，避免連點
+
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
     alert("無法取得麥克風權限：" + e.message);
+    starting = false;
+    recordBtn.disabled = false;
     return;
   }
 
@@ -164,7 +171,13 @@ async function startRecording() {
   analyserData = new Uint8Array(analyser.frequencyBinCount);
   src.connect(analyser);
 
+  // 保險起見，啟動新計時器前先清掉任何殘留的舊計時器（理論上不該有，但避免萬一）
+  if (timerHandle) clearInterval(timerHandle);
+  if (vuHandle) clearInterval(vuHandle);
+
   recording = true;
+  starting = false;
+  recordBtn.disabled = false;
   startedAt = Date.now();
   recordBtn.setAttribute("aria-pressed", "true");
   statusDot.classList.add("live");
@@ -240,6 +253,7 @@ async function processAudio(blob) {
     form.append("model", settings.model);
     form.append("user", settings.userId || "");
     form.append("extra", extraInput.value || "");
+    form.append("focus", $("focusSelect").value || "general");
 
     const res = await fetch(settings.workerUrl.replace(/\/$/, "") + "/process", {
       method: "POST",
