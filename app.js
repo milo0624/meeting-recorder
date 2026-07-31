@@ -13,9 +13,9 @@ const MODEL_LIMITS = {
 
 function loadSettings() {
   try {
-    return { model: "gemini-flash-latest", workerUrl: "", ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
+    return { model: "gemini-flash-latest", workerUrl: "", userId: "", ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
   } catch {
-    return { model: "gemini-flash-latest", workerUrl: "" };
+    return { model: "gemini-flash-latest", workerUrl: "", userId: "" };
   }
 }
 function saveSettings(s) {
@@ -147,9 +147,11 @@ async function startRecording() {
   // 只是實務上多半也能被接受；若上傳失敗，優先確認是不是卡在這裡。
   const candidates = ["audio/mp4", "audio/ogg;codecs=opus", "audio/webm;codecs=opus"];
   const mimeType = candidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
-  mediaRecorder = mimeType
-    ? new MediaRecorder(mediaStream, { mimeType })
-    : new MediaRecorder(mediaStream);
+  // 語音錄音不需要音樂等級的位元率，降到 48kbps 音質仍然清楚，
+  // 但檔案大小只有預設值的 1/3~1/4，14MB 上限大概可以錄到 40 分鐘以上
+  // （原本用瀏覽器預設位元率，大概 10 分鐘左右就會撞到檔案大小上限）。
+  const recorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 };
+  mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
   mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   mediaRecorder.onstop = onRecordingStopped;
   mediaRecorder.start(1000);
@@ -236,6 +238,7 @@ async function processAudio(blob) {
     const form = new FormData();
     form.append("audio", blob, "meeting." + ext);
     form.append("model", settings.model);
+    form.append("user", settings.userId || "");
     form.append("extra", extraInput.value || "");
 
     const res = await fetch(settings.workerUrl.replace(/\/$/, "") + "/process", {
@@ -301,6 +304,7 @@ const settingsView = $("settingsView");
 function openSettings() {
   $("workerUrl").value = settings.workerUrl;
   $("modelSelect").value = settings.model;
+  $("userIdInput").value = settings.userId || "";
   mainView.hidden = true;
   settingsView.hidden = false;
 }
@@ -320,6 +324,7 @@ $("settingsSave").addEventListener("click", () => {
     }
     settings.workerUrl = url;
     settings.model = $("modelSelect").value;
+    settings.userId = $("userIdInput").value.trim();
     saveSettings(settings);
     updateQuotaPanel();
     closeSettings();

@@ -55,7 +55,10 @@
   <div class="transport">
     <button class="rec-btn" id="recordBtn" aria-pressed="false">
       <span class="rec-btn__ring"></span>
-      <span class="rec-btn__core"></span>
+      <svg class="rec-btn__bolt" viewBox="0 0 100 100" aria-hidden="true">
+        <path class="rec-btn__bolt-shape" d="M58 6 L24 54 L45 54 L38 94 L78 42 L55 42 Z" />
+        <path class="rec-btn__tail-shape" d="M68 76 C 82 77, 92 88, 87 100 C 80 91, 73 89, 64 91 C 68 86, 69 81, 68 76 Z" />
+      </svg>
     </button>
     <div class="transport__label" id="recordLabel">按下開始錄音</div>
   </div>
@@ -100,6 +103,12 @@
       <span class="fascia__title">設定</span>
     </div>
   </header>
+
+  <div class="field">
+    <label for="userIdInput">使用者代號</label>
+    <input id="userIdInput" type="text" placeholder="例如：jimmy（跟管理員確認你的代號）" />
+    <p class="hint">每個人用自己的代號，Worker 才會用你自己的 Gemini Key 處理，額度互不影響。</p>
+  </div>
 
   <div class="field">
     <label for="workerUrl">Worker 端點網址</label>
