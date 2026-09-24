@@ -11,6 +11,15 @@ const MODEL_LIMITS = {
   "gemini-pro-latest": { rpm: 5, rpd: 100, tpm: 250000 },
 };
 
+// Worker 目前是把整個音檔用 inline base64 塞進 Gemini 的 generateContent 請求，
+// 而不是先呼叫 Gemini File API 拿 URI 再引用——inline 請求本身有大小上限，
+// 實測大約 14MB 原始檔案（base64 後接近 19MB）左右就會被拒絕或逾時。
+// 這裡在送出前先擋掉超過上限的檔案，避免使用者等了老半天才收到失敗訊息，
+// 完全不會影響 App 內建錄音（見上面 24kbps 的調整）；但既有的大檔案上傳
+// （例如外部錄的 1 小時 40MB 錄音）沒辦法用調位元率解決，真的要處理這種
+// 檔案，Worker 端要改成先呼叫 File API 上傳、再用 URI 呼叫 generateContent。
+const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
+
 function loadSettings() {
   try {
     return { model: "gemini-flash-latest", workerUrl: "", userId: "", ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -65,6 +74,7 @@ function wouldExceed(model) {
   const hit = [];
   if (s.rpd.limit && s.rpd.used >= s.rpd.limit) hit.push(`今日請求數已達上限 ${s.rpd.used}/${s.rpd.limit}（RPD）`);
   if (s.rpm.limit && s.rpm.used >= s.rpm.limit) hit.push(`本分鐘請求數已達上限 ${s.rpm.used}/${s.rpm.limit}（RPM）`);
+  if (s.tpm.limit && s.tpm.used >= s.tpm.limit) hit.push(`本分鐘 token 數已達上限 ${s.tpm.used}/${s.tpm.limit}（TPM）`);
   return hit;
 }
 
@@ -158,10 +168,10 @@ async function startRecording() {
   // 只是實務上多半也能被接受；若上傳失敗，優先確認是不是卡在這裡。
   const candidates = ["audio/mp4", "audio/ogg;codecs=opus", "audio/webm;codecs=opus"];
   const mimeType = candidates.find((t) => MediaRecorder.isTypeSupported(t)) || "";
-  // 語音錄音不需要音樂等級的位元率，降到 48kbps 音質仍然清楚，
-  // 但檔案大小只有預設值的 1/3~1/4，14MB 上限大概可以錄到 40 分鐘以上
-  // （原本用瀏覽器預設位元率，大概 10 分鐘左右就會撞到檔案大小上限）。
-  const recorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 48000 } : { audioBitsPerSecond: 48000 };
+  // 語音錄音不需要音樂等級的位元率。原本用 48kbps，1 小時的會議約 21.6MB，
+  // 已經超過下面 MAX_UPLOAD_BYTES（14MB）的安全上限；降到 24kbps 之後
+  // 1 小時約 10.8MB，錄到 80 分鐘左右才會撞到上限，語音清晰度仍然足夠。
+  const recorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 24000 } : { audioBitsPerSecond: 24000 };
   mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
   mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   mediaRecorder.onstop = onRecordingStopped;
@@ -240,6 +250,20 @@ async function processAudio(blob) {
   if (!settings.workerUrl) {
     alert("尚未設定 Worker 端點網址，請先到「⚙ 設定」填寫。");
     openSettings();
+    return;
+  }
+
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    const mb = (blob.size / 1024 / 1024).toFixed(1);
+    const limitMb = (MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0);
+    statusText.textContent = `檔案 ${mb}MB 超過目前上限（約 ${limitMb}MB），已取消上傳。`;
+    alert(
+      `這個音檔有 ${mb}MB，超過目前後端單次請求支援的上限（約 ${limitMb}MB）。\n\n` +
+      `可以試試：\n` +
+      `1) 之後改用這個 App 內建的錄音功能——已經調成 24kbps，1 小時約 10.8MB，安全很多；\n` +
+      `2) 用其他工具把這個檔案轉成較低位元率的單聲道 AAC/Opus（例如 24～32kbps）再上傳；\n` +
+      `3) 把長會議切成幾段，分開上傳、分開產生記錄。`
+    );
     return;
   }
 
