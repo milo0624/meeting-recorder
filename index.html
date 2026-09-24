@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#14161a" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="style.css" />
@@ -25,7 +26,7 @@
 
     <div class="lcd">
       <div class="lcd__time" id="elapsed">00:00</div>
-      <div class="lcd__label" id="statusText">尚未開始錄音</div>
+      <div class="lcd__label" id="statusText" aria-live="polite">尚未開始錄音</div>
     </div>
 
     <!-- VU 音量表：分段 LED 風格，即時反映麥克風音量 -->
@@ -63,7 +64,7 @@
 
   <!-- ── 傳輸鍵區：像錄音機的按鍵列 ───────────────────────────── -->
   <div class="transport">
-    <button class="rec-btn" id="recordBtn" aria-pressed="false">
+    <button class="rec-btn" id="recordBtn" aria-pressed="false" aria-label="開始或停止錄音">
       <span class="rec-btn__ring"></span>
       <svg class="rec-btn__bolt" viewBox="0 0 100 100" aria-hidden="true">
         <path class="rec-btn__bolt-shape" d="M58 6 L24 54 L45 54 L38 94 L78 42 L55 42 Z" />
