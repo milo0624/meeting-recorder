@@ -20,6 +20,97 @@ const MODEL_LIMITS = {
 // 檔案，Worker 端要改成先呼叫 File API 上傳、再用 URI 呼叫 generateContent。
 const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
 
+/* ── 瀏覽器內壓縮：解碼 → 單聲道 16kHz → MP3（lamejs，在背景執行緒編碼）──
+   語音辨識不需要高音質：16kHz 單聲道 24kbps，1 小時約 10.8MB，
+   剛好能塞進上面 14MB 的上限。超過約 70 分鐘就自動降到 16kbps / 8kbps。 */
+const COMPRESS_RATE = 16000;
+const COMPRESS_TARGET_BYTES = 13 * 1024 * 1024; // 留一點安全邊際
+
+function pickBitrate(durationSec, targetBytes) {
+  for (const kbps of [24, 16, 8]) {
+    if ((durationSec * kbps * 1000) / 8 <= targetBytes) return kbps;
+  }
+  return 8; // 再長也只能盡量壓了，送出前仍會再檢查一次大小
+}
+
+function decodeToBuffer(arrayBuffer) {
+  const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  // 用 16kHz 的 OfflineAudioContext 解碼，瀏覽器會直接重新取樣成 16kHz，
+  // 記憶體用量只有 48kHz 解碼的 1/3（長錄音在手機上才不容易爆掉）
+  const ctx = new Ctx(1, COMPRESS_RATE, COMPRESS_RATE);
+  return new Promise((resolve, reject) => {
+    // 舊版 Safari 只支援 callback 寫法，兩種都接
+    const p = ctx.decodeAudioData(arrayBuffer, resolve, reject);
+    if (p && p.then) p.then(resolve, reject);
+  });
+}
+
+function toMonoInt16(audioBuffer) {
+  const n = audioBuffer.length;
+  const chs = [];
+  for (let c = 0; c < audioBuffer.numberOfChannels; c++) chs.push(audioBuffer.getChannelData(c));
+  const out = new Int16Array(n);
+  const k = chs.length;
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let c = 0; c < k; c++) s += chs[c][i];
+    s /= k;
+    out[i] = s < -1 ? -32768 : s > 1 ? 32767 : Math.round(s * 32767);
+  }
+  return out;
+}
+
+/**
+ * 把音檔壓成小 MP3。onProgress(文字) 用來更新畫面。
+ * targetBytes 有給的話，會依錄音長度自動挑位元率，讓結果小於這個大小。
+ */
+async function compressAudio(blob, { targetBytes = COMPRESS_TARGET_BYTES, onProgress = () => {} } = {}) {
+  onProgress("讀取音檔中…");
+  const raw = await blob.arrayBuffer();
+
+  onProgress("解碼音檔中（長錄音需要一點時間）…");
+  let audioBuffer = await decodeToBuffer(raw);
+  const duration = audioBuffer.duration;
+  const kbps = pickBitrate(duration, targetBytes);
+  let samples = toMonoInt16(audioBuffer);
+  audioBuffer = null; // 盡早放掉解碼後的大陣列
+
+  const mins = Math.round(duration / 60);
+  const blobOut = await new Promise((resolve, reject) => {
+    const worker = new Worker("mp3-worker.js");
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "progress") onProgress(`壓縮中…${m.pct}%（約 ${mins} 分鐘錄音，${kbps}kbps）`);
+      else if (m.type === "done") { worker.terminate(); resolve(m.blob); }
+      else if (m.type === "error") { worker.terminate(); reject(new Error(m.message)); }
+    };
+    worker.onerror = (e) => { worker.terminate(); reject(new Error(e.message || "壓縮執行緒錯誤")); };
+    // 用 transfer 直接把記憶體交給 worker，不多複製一份
+    worker.postMessage({ samples, sampleRate: COMPRESS_RATE, kbps }, [samples.buffer]);
+    samples = null;
+  });
+
+  const base = (blob.name || "meeting").replace(/\.[^.]+$/, "");
+  return new File([blobOut], `${base}_壓縮.mp3`, { type: "audio/mpeg" });
+}
+
+function fmtMB(bytes) { return (bytes / 1024 / 1024).toFixed(1) + "MB"; }
+
+/* ── 下載或分享一個檔案（iOS 走分享選單，其他走下載）──────────── */
+async function shareOrDownload(file, title) {
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title });
+      return;
+    } catch { /* 使用者取消分享，改走下載 */ }
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function loadSettings() {
   try {
     return { model: "gemini-flash-latest", workerUrl: "", userId: "", ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -253,16 +344,31 @@ async function processAudio(blob) {
     return;
   }
 
+  // 太大的檔案先在瀏覽器裡自動壓縮成小 MP3，再送出
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    const before = blob.size;
+    setBusy(true, `檔案 ${fmtMB(before)} 超過上限，先自動壓縮…`);
+    try {
+      blob = await compressAudio(blob, { onProgress: (t) => { busyText.textContent = t; } });
+      statusText.textContent = `已壓縮：${fmtMB(before)} → ${fmtMB(blob.size)}`;
+    } catch (e) {
+      console.error(e);
+      statusText.textContent = "自動壓縮失敗。";
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (blob.size > MAX_UPLOAD_BYTES) {
     const mb = (blob.size / 1024 / 1024).toFixed(1);
     const limitMb = (MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0);
     statusText.textContent = `檔案 ${mb}MB 超過目前上限（約 ${limitMb}MB），已取消上傳。`;
     alert(
-      `這個音檔有 ${mb}MB，超過目前後端單次請求支援的上限（約 ${limitMb}MB）。\n\n` +
+      `這個音檔有 ${mb}MB，自動壓縮後仍超過上限（約 ${limitMb}MB），或壓縮失敗` +
+      `（手機記憶體不足時常見，通常是錄音太長）。\n\n` +
       `可以試試：\n` +
-      `1) 之後改用這個 App 內建的錄音功能——已經調成 24kbps，1 小時約 10.8MB，安全很多；\n` +
-      `2) 用其他工具把這個檔案轉成較低位元率的單聲道 AAC/Opus（例如 24～32kbps）再上傳；\n` +
-      `3) 把長會議切成幾段，分開上傳、分開產生記錄。`
+      `1) 改用電腦瀏覽器開這個網頁上傳，電腦記憶體比較夠；\n` +
+      `2) 把長會議切成幾段，分開上傳、分開產生記錄。`
     );
     return;
   }
@@ -332,6 +438,7 @@ function setBusy(busy, msg) {
   busyText.textContent = msg || "處理中…";
   recordBtn.disabled = busy;
   uploadTriggerBtn.disabled = busy;
+  compressTriggerBtn.disabled = busy;
 }
 
 /* ── 用量面板 ─────────────────────────────────────────────────── */
@@ -393,13 +500,25 @@ recordBtn.addEventListener("click", () => {
 
 /* ── 上傳既有錄音檔（不用錄音，直接選檔案） ───────────────────── */
 const uploadTriggerBtn = $("uploadTriggerBtn");
+const compressTriggerBtn = $("compressTriggerBtn");
 const fileInput = $("fileInput");
+let fileMode = "process"; // "process"：送給 Gemini；"compress"：只壓縮、下載
 
 uploadTriggerBtn.addEventListener("click", () => {
   if (recording) {
     alert("正在錄音中，請先停止錄音再上傳檔案。");
     return;
   }
+  fileMode = "process";
+  fileInput.click();
+});
+
+compressTriggerBtn.addEventListener("click", () => {
+  if (recording) {
+    alert("正在錄音中，請先停止錄音再選檔案。");
+    return;
+  }
+  fileMode = "compress";
   fileInput.click();
 });
 
@@ -409,9 +528,48 @@ fileInput.addEventListener("change", async () => {
   if (!file) return;
 
   elapsedEl.textContent = "--:--";
+
+  if (fileMode === "compress") {
+    await compressOnly(file);
+    return;
+  }
+
   statusText.textContent = `已選擇檔案：${file.name}，準備送出給 Gemini…`;
   await processAudio(file);
 });
+
+/* ── 只壓縮、不送出：直接把小 MP3 下載 / 分享出去 ─────────────── */
+const compressedDownloadBtn = $("compressedDownloadBtn");
+let lastCompressedFile = null;
+compressedDownloadBtn.addEventListener("click", () => {
+  if (lastCompressedFile) shareOrDownload(lastCompressedFile, "壓縮後的錄音");
+});
+
+async function compressOnly(file) {
+  compressedDownloadBtn.hidden = true;
+  lastCompressedFile = null;
+  setBusy(true, "準備壓縮…");
+  try {
+    // 只壓縮時固定用 24kbps（語音清楚、檔案小）；超長錄音才自動再降
+    const out = await compressAudio(file, { onProgress: (t) => { busyText.textContent = t; } });
+    const pct = Math.round((1 - out.size / file.size) * 100);
+    statusText.textContent = `壓縮完成：${fmtMB(file.size)} → ${fmtMB(out.size)}（${pct > 0 ? "減少 " + pct + "%" : "原檔已經很小"}）`;
+    // iOS 的分享選單一定要「使用者剛點擊」才能開，壓縮完不能自動跳，
+    // 所以顯示一顆按鈕讓使用者自己按
+    lastCompressedFile = out;
+    compressedDownloadBtn.textContent = `💾 下載壓縮後的錄音（${fmtMB(out.size)}）`;
+    compressedDownloadBtn.hidden = false;
+  } catch (e) {
+    console.error(e);
+    statusText.textContent = "壓縮失敗。";
+    alert(
+      "壓縮失敗：" + (e && e.message ? e.message : e) +
+      "\n\n若是很長的錄音，手機可能記憶體不足，可以改用電腦瀏覽器開這個網頁再試一次。"
+    );
+  } finally {
+    setBusy(false);
+  }
+}
 
 /* ── 下載 / 分享報告 ──────────────────────────────────────────── */
 saveBtn.addEventListener("click", async () => {

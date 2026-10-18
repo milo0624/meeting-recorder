@@ -73,6 +73,7 @@
     </button>
     <div class="transport__label" id="recordLabel">按下開始錄音</div>
     <button class="link-btn" id="uploadTriggerBtn" type="button">或上傳既有錄音檔</button>
+    <button class="link-btn" id="compressTriggerBtn" type="button">只壓縮錄音檔（轉成小 MP3，不送出）</button>
     <input type="file" id="fileInput" accept="audio/*,.m4a,.caf,.mp3,.wav,.aac,.aif,.aiff,.flac,.ogg" hidden />
   </div>
 
@@ -80,6 +81,8 @@
     <span class="spinner"></span>
     <span id="busyText">處理中…</span>
   </div>
+
+  <button class="pill-btn" id="compressedDownloadBtn" hidden>💾 下載壓縮後的錄音</button>
 
   <button class="pill-btn pill-btn--ghost" id="downloadRawBtn" hidden>⚠ 處理失敗，下載原始錄音檔</button>
 
