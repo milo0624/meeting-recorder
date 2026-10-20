@@ -417,8 +417,9 @@ async function processAudio(blob) {
       throw new Error("伺服器回傳的內容無法解讀：\n" + bodyText.trim().slice(0, 300));
     }
     if (data.error) throw new Error(data.error);
+    const modelUsed = data.model_used || settings.model;
     recordUsage({
-      model: settings.model,
+      model: modelUsed,
       prompt: data.usage?.prompt_tokens || 0,
       output: data.usage?.output_tokens || 0,
       total: data.usage?.total_tokens || 0,
@@ -427,7 +428,8 @@ async function processAudio(blob) {
     resultFrame.srcdoc = buildPreview(data.text);
     resultSection.hidden = false;
     saveBtn.disabled = false;
-    statusText.textContent = `完成。本次用了 ${(data.usage?.total_tokens || 0).toLocaleString()} tokens。`;
+    statusText.textContent = `完成。本次用了 ${(data.usage?.total_tokens || 0).toLocaleString()} tokens。` +
+      (modelUsed !== settings.model ? `（${settings.model} 太忙，改用 ${modelUsed} 產生）` : "");
     downloadRawBtn.hidden = true; // 成功了就不用留救援按鈕
     lastFailedBlob = null;
   } catch (e) {
