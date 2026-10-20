@@ -398,12 +398,25 @@ async function processAudio(blob) {
       body: form,
     });
 
+    const bodyText = await res.text();
+    if (res.status === 524 || /error code: 524/.test(bodyText)) {
+      throw new Error(
+        "處理超過 100 秒，被 Cloudflare 中斷（524）。\n" +
+        "請確認 Worker 已更新成「先回應、保持連線」的版本。"
+      );
+    }
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(errText || `伺服器錯誤（${res.status}）`);
+      throw new Error(bodyText || `伺服器錯誤（${res.status}）`);
     }
 
-    const data = await res.json(); // { text, usage: {prompt_tokens, output_tokens, total_tokens} }
+    // 新版 Worker 會先送一串空白保持連線，再送 JSON；JSON.parse 會自動略過前面的空白
+    let data;
+    try {
+      data = JSON.parse(bodyText); // { text, usage } 或 { error }
+    } catch {
+      throw new Error("伺服器回傳的內容無法解讀：\n" + bodyText.trim().slice(0, 300));
+    }
+    if (data.error) throw new Error(data.error);
     recordUsage({
       model: settings.model,
       prompt: data.usage?.prompt_tokens || 0,
