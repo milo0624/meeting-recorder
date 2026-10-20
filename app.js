@@ -336,6 +336,93 @@ async function onRecordingStopped() {
   await processAudio(blob);
 }
 
+/* ── Worker 呼叫的輔助函式 ────────────────────────────────────── */
+// Cloudflare 自己的錯誤頁（例如 524 逾時）轉成看得懂的訊息
+function cfError(status, body) {
+  if (status === 524 || /error code: 524/.test(body || "")) {
+    return "等候超過 100 秒，被 Cloudflare 中斷（524）。請確認 Worker 已更新成最新版。";
+  }
+  return null;
+}
+
+class GeminiError extends Error {
+  constructor(status, message) { super(`（${status}）${message}`); this.status = status; }
+}
+
+// 呼叫一次 /generate，讀 Gemini 的串流（SSE），回傳 { text, usage }
+async function generateOnce({ base, user, file, model, extra, focus }) {
+  const res = await fetch(base + "/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user, file, model, extra, focus }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new GeminiError(res.status, cfError(res.status, t) || t);
+  }
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", text = "", usage = {};
+  const handleEvent = (raw) => {
+    let ev = "message", data = "";
+    for (const line of raw.split(/\r?\n/)) {
+      if (line.startsWith("event:")) ev = line.slice(6).trim();
+      else if (line.startsWith("data:")) data += line.slice(5).trim();
+    }
+    if (!data) return; // ": ping" 之類的註解行
+    const j = JSON.parse(data);
+    if (ev === "error") throw new GeminiError(j.status || 500, j.message || "未知錯誤");
+    if (j.error) throw new GeminiError(j.error.code || 500, j.error.message || "未知錯誤");
+    const parts = j.candidates?.[0]?.content?.parts || [];
+    text += parts.map((p) => p.text || "").join("");
+    if (j.usageMetadata) usage = j.usageMetadata;
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.search(/\r?\n\r?\n/)) >= 0) {
+      const raw = buf.slice(0, idx);
+      buf = buf.slice(idx).replace(/^\r?\n\r?\n/, "");
+      handleEvent(raw);
+    }
+    busyText.textContent = text
+      ? `Gemini 撰寫中…已產生 ${text.length.toLocaleString()} 字`
+      : "Gemini 正在聽錄音（長錄音需要一點時間）…";
+  }
+  if (buf.trim()) handleEvent(buf);
+  if (!text) throw new GeminiError(500, "Gemini 沒有回傳內容（可能被中斷），請再試一次。");
+  return { text, usage };
+}
+
+// Gemini 太忙（503/500）時自動等一下再試；同模型試 4 次，最後改用 flash-lite
+async function generateWithRetry(opts) {
+  const plan = [0, 5, 15, 30].map((d) => ({ model: opts.model, delay: d }));
+  if (opts.model !== "gemini-flash-lite-latest") plan.push({ model: "gemini-flash-lite-latest", delay: 5 });
+  let lastErr;
+  for (let i = 0; i < plan.length; i++) {
+    const step = plan[i];
+    for (let s = step.delay; s > 0; s--) {
+      busyText.textContent = `Gemini 目前太忙，${s} 秒後重試（第 ${i + 1}/${plan.length} 次）…`;
+      await sleep(1000);
+    }
+    busyText.textContent = "Gemini 正在聽錄音（長錄音需要一點時間）…";
+    try {
+      const r = await generateOnce({ ...opts, model: step.model });
+      return { ...r, modelUsed: step.model };
+    } catch (e) {
+      lastErr = e;
+      if (!(e instanceof GeminiError) || (e.status !== 503 && e.status !== 500)) throw e;
+    }
+  }
+  throw lastErr;
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
 /* ── 呼叫 Worker（Gemini 處理）────────────────────────────────── */
 async function processAudio(blob) {
   if (!settings.workerUrl) {
@@ -386,49 +473,46 @@ async function processAudio(blob) {
       typeof File !== "undefined" && blob instanceof File && blob.name
         ? blob.name
         : "meeting." + (blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm");
+    const base = settings.workerUrl.replace(/\/$/, "");
+    const user = settings.userId || "";
+
+    // ① 上傳音檔到 Gemini（Worker 很快就回應）
+    busyText.textContent = "上傳音檔中…";
     const form = new FormData();
     form.append("audio", blob, filename);
-    form.append("model", settings.model);
-    form.append("user", settings.userId || "");
-    form.append("extra", extraInput.value || "");
-    form.append("focus", $("focusSelect").value || "general");
+    form.append("user", user);
+    const upRes = await fetch(base + "/upload", { method: "POST", body: form });
+    const upText = await upRes.text();
+    if (upRes.status === 404) throw new Error("Worker 還是舊版（找不到 /upload），請到 Cloudflare 更新 Worker 程式碼。");
+    if (!upRes.ok) throw new Error(cfError(upRes.status, upText) || upText || `上傳失敗（${upRes.status}）`);
+    const { file } = JSON.parse(upText);
 
-    const res = await fetch(settings.workerUrl.replace(/\/$/, "") + "/process", {
-      method: "POST",
-      body: form,
+    // ② 請 Gemini 產生會議記錄（串流，邊寫邊傳回來）；太忙就自動重試
+    const { text, usage, modelUsed } = await generateWithRetry({
+      base, user, file,
+      model: settings.model,
+      extra: extraInput.value || "",
+      focus: $("focusSelect").value || "general",
     });
 
-    const bodyText = await res.text();
-    if (res.status === 524 || /error code: 524/.test(bodyText)) {
-      throw new Error(
-        "處理超過 100 秒，被 Cloudflare 中斷（524）。\n" +
-        "請確認 Worker 已更新成「先回應、保持連線」的版本。"
-      );
-    }
-    if (!res.ok) {
-      throw new Error(bodyText || `伺服器錯誤（${res.status}）`);
-    }
+    // ③ 刪掉 Gemini 上的暫存檔（失敗也沒關係）
+    fetch(base + "/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user, name: file.name }),
+    }).catch(() => {});
 
-    // 新版 Worker 會先送一串空白保持連線，再送 JSON；JSON.parse 會自動略過前面的空白
-    let data;
-    try {
-      data = JSON.parse(bodyText); // { text, usage } 或 { error }
-    } catch {
-      throw new Error("伺服器回傳的內容無法解讀：\n" + bodyText.trim().slice(0, 300));
-    }
-    if (data.error) throw new Error(data.error);
-    const modelUsed = data.model_used || settings.model;
     recordUsage({
       model: modelUsed,
-      prompt: data.usage?.prompt_tokens || 0,
-      output: data.usage?.output_tokens || 0,
-      total: data.usage?.total_tokens || 0,
+      prompt: usage.promptTokenCount || 0,
+      output: usage.candidatesTokenCount || 0,
+      total: usage.totalTokenCount || 0,
     });
-    lastReportHtml = data.text;
-    resultFrame.srcdoc = buildPreview(data.text);
+    lastReportHtml = text;
+    resultFrame.srcdoc = buildPreview(text);
     resultSection.hidden = false;
     saveBtn.disabled = false;
-    statusText.textContent = `完成。本次用了 ${(data.usage?.total_tokens || 0).toLocaleString()} tokens。` +
+    statusText.textContent = `完成。本次用了 ${(usage.totalTokenCount || 0).toLocaleString()} tokens。` +
       (modelUsed !== settings.model ? `（${settings.model} 太忙，改用 ${modelUsed} 產生）` : "");
     downloadRawBtn.hidden = true; // 成功了就不用留救援按鈕
     lastFailedBlob = null;
